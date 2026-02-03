@@ -147,7 +147,7 @@ def main():
             title_text = BeautifulSoup(item.title, "html.parser").get_text().strip()
         else:
             title_text = item.title.strip()
-        post_text = f"{title_text}\n{item.link}"
+        post_text = title_text
         logging.info("Title+link used as content: %s", post_text)
         rich_text = make_rich(post_text)
         logging.info("Rich text length: %d" % (len(rich_text.build_text())))
@@ -174,6 +174,7 @@ def main():
                 logging.info("No link metadata for %s; skipping card", item.link)
             embed = external_embed
             if not embed and thumb_blob:
+				post_text = f"{post_text}\n{item.link}"
                 alt_text = title_text or link_metadata.get("title") or "Preview image"
                 embed = models.AppBskyEmbedImages.Main(
                     images=[
