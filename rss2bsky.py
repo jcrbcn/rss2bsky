@@ -141,17 +141,30 @@ def main():
             if link_metadata.get("image"):
                 thumb_blob = get_image_blob(link_metadata["image"], client)
 
-            logging.info("Using link card for %s", item.link)
-
-            external_embed = models.AppBskyEmbedExternal.Main(
-                external=models.AppBskyEmbedExternal.External(
-                    uri=item.link,
-                    title=link_metadata.get("title") or title_text or item.link,
-                    description=link_metadata.get("description") or "",
-                    thumb=thumb_blob,
+            external_embed = None
+            if link_metadata.get("title") or link_metadata.get("description"):
+                logging.info("Using link card for %s", item.link)
+                external_embed = models.AppBskyEmbedExternal.Main(
+                    external=models.AppBskyEmbedExternal.External(
+                        uri=item.link,
+                        title=link_metadata.get("title") or title_text or item.link,
+                        description=link_metadata.get("description") or "",
+                        thumb=thumb_blob,
+                    )
                 )
-            )
+            else:
+                logging.info("No link metadata for %s; skipping card", item.link)
             embed = external_embed
+            if not embed and thumb_blob:
+                alt_text = title_text or link_metadata.get("title") or "Preview image"
+                embed = models.AppBskyEmbedImages.Main(
+                    images=[
+                        models.AppBskyEmbedImages.Image(
+                            alt=alt_text,
+                            image=thumb_blob,
+                        )
+                    ]
+                )
 
             # Post
             try:
