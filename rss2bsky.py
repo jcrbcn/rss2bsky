@@ -106,6 +106,37 @@ def is_html(text):
     return bool(re.search(r"<.*?>", text))
 
 
+def trim_link_description(text, phrase_start_limit=150, total_limit=200):
+    if not text:
+        return text
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized:
+        return normalized
+
+    phrases = []
+    for match in re.finditer(r"[^.!?]+[.!?]?", normalized):
+        phrase = match.group(0).strip()
+        if phrase:
+            phrases.append((match.start(), phrase))
+
+    if not phrases:
+        return normalized[:phrase_start_limit].rstrip()
+
+    selected = []
+    for idx, (start, phrase) in enumerate(phrases):
+        if start <= phrase_start_limit:
+            selected.append(phrase)
+
+    if not selected:
+        return normalized[:phrase_start_limit].rstrip()
+
+    combined = " ".join(selected).strip()
+    if len(selected) > 1 and len(combined) > total_limit:
+        selected.pop()
+        combined = " ".join(selected).strip()
+    return combined
+
+
 def translate_text(text, target_lang):
     if not text or not target_lang:
         return text
@@ -323,7 +354,6 @@ def main():
         link_for_post = entry["link_for_post"]
         rich_text = entry["rich_text"]
 
-        # if True:  # FOR TESTING ONLY!
         link_metadata = fetch_link_metadata(item.link)
         thumb_blob = None
         if link_metadata.get("image"):
@@ -333,7 +363,8 @@ def main():
         translated_description = None
         if translate_target and link_metadata.get("description"):
             translated_description = translate_text(
-                link_metadata.get("description"), translate_target
+                trim_link_description(link_metadata.get("description")),
+                translate_target,
             )
         if link_metadata.get("title") or link_metadata.get("description"):
             logging.info("Using link card for %s", item.link)
