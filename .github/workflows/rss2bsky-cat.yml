@@ -1,4 +1,4 @@
-name: Mundo Deportivo Post RSS to BSKY
+name: Mundo Deportivo Post RSS to BSKY (Catalan)
 description: "A GitHub Action to post RSS feed items to Bluesky (BSKY) using a Python script."
 
 on:
