@@ -137,7 +137,7 @@ def trim_link_description(text, phrase_start_limit=150, total_limit=200):
     return combined
 
 
-def translate_text(text, target_lang):
+def translate_text(text, source_lang, target_lang):
     if not text or not target_lang:
         return text
     auth_key = os.environ.get("DEEPL_AUTH_KEY")
@@ -146,7 +146,7 @@ def translate_text(text, target_lang):
     target_lang = target_lang.replace("_", "-").upper()
     res = httpx.post(
         "https://api-free.deepl.com/v2/translate",
-        data={"text": text, "source_lang": "ES", "target_lang": target_lang},
+        data={"text": text, "source_lang": source_lang, "target_lang": target_lang},
         headers={"Authorization": f"DeepL-Auth-Key {auth_key}"},
         timeout=10,
     )
@@ -225,6 +225,11 @@ def main():
         ),
     )
     parser.add_argument(
+        "--translate-source",
+        default="auto",
+        help='Translate post text from source language (e.g. "en"). Requires DEEPL_AUTH_KEY.',
+    )
+    parser.add_argument(
         "--translate-target",
         default=None,
         help='Translate post text to target language (e.g. "ca"). Requires DEEPL_AUTH_KEY.',
@@ -258,6 +263,7 @@ def main():
     bsky_password = args.bsky_app_password
     path_only = args.path_only
     translate_target = args.translate_target
+    translate_source = args.translate_source
     translation_pretext = args.translation_pretext
     category_formats = load_category_format_file(args.category_format_file)
     spread_seconds = max(0, args.spread_seconds)
@@ -306,7 +312,7 @@ def main():
         translated_title = None
         translated_link = None
         if translate_target:
-            translated_title = translate_text(title_text, translate_target)
+            translated_title = translate_text(title_text, translate_source, translate_target)
             translated_post_text = format_post_text(
                 translated_title, category, category_formats
             )
