@@ -174,7 +174,7 @@ def main():
                 logging.info("No link metadata for %s; skipping card", item.link)
             embed = external_embed
             if not embed and thumb_blob:
-				post_text = f"{post_text}\n{item.link}"
+                post_text = f"{post_text}\n{item.link}"
                 alt_text = title_text or link_metadata.get("title") or "Preview image"
                 embed = models.AppBskyEmbedImages.Main(
                     images=[
