@@ -324,11 +324,11 @@ def main():
                 )
 
             # Post
-            # try:
-            #     client.send_post(rich_text, embed=embed)
-            #     logging.info("Sent post %s" % (item.link))
-            # except Exception as e:
-            #     logging.exception("Failed to post %s" % (item.link))
+            try:
+                client.send_post(rich_text, embed=embed)
+                logging.info("Sent post %s" % (item.link))
+            except Exception as e:
+                logging.exception("Failed to post %s" % (item.link))
         else:
             logging.debug("Not sending %s" % (item.link))
 
