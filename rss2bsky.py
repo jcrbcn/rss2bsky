@@ -97,11 +97,21 @@ def main():
     parser.add_argument("bsky_handle", help="Bluesky handle")
     parser.add_argument("bsky_username", help="Bluesky username")
     parser.add_argument("bsky_app_password", help="Bluesky app password")
+    parser.add_argument(
+        "--path-only",
+        action="append",
+        default=[],
+        help=(
+            "Only post items whose URL path matches this subpath (repeatable, "
+            "e.g. --path-only futbol --path-only basket)"
+        ),
+    )
     args = parser.parse_args()
     feed_url = args.rss_feed
     bsky_handle = args.bsky_handle
     bsky_username = args.bsky_username
     bsky_password = args.bsky_app_password
+    path_only = args.path_only
 
     # --- Login ---
     client = Client()
@@ -124,6 +134,14 @@ def main():
     for item in feed.entries:
         rss_time = arrow.get(item.published)
         logging.info("RSS Time: %s", str(rss_time))
+        if path_only:
+            item_path = urlparse(item.link).path.lstrip("/")
+            if not any(
+                item_path == prefix or item_path.startswith(f"{prefix}/")
+                for prefix in path_only
+            ):
+                logging.debug("Skipping %s due to path filter %s", item.link, path_only)
+                continue
         # Use only the plain title as content, and add the link on a new line
         if is_html(item.title):
             title_text = BeautifulSoup(item.title, "html.parser").get_text().strip()
