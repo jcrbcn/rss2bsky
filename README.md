@@ -3,7 +3,6 @@ RSS to Bluesky - in Python
 
 This is a proof-of-concept implementation for posting RSS/Atom content to Bluesky. Some hacking may be required. Issues and pull requests welcome to improve the system.
 
-
 ## Built with:
 
 * [arrow](https://arrow.readthedocs.io/) - Time handling for humans
@@ -16,10 +15,9 @@ This is a proof-of-concept implementation for posting RSS/Atom content to Bluesk
 
 * Deduplication: The script queries the target timeline and only posts RSS items that are more recent than the latest top-level post by the handle.
 * Filters: Easy to extend code to support filters on RSS contents for simple transformations and limiting cross-posts.
-* Minimal rich-text support (links): Rich text is represented in a typed hierarchy in the AT protocol. This script currently performs post-processing on filtered string content of the input feeds to support links as long as they stand as a single line in the text. This definitely needs some improvement.
-* Threading for long posts
-* Tags
-* Image references: Can forward image links from RSS to Bsky
+* Minimal rich-text support (links and tags): URLs on their own line are linked and inline hashtags are tagged.
+* Link cards: Fetches basic metadata (title/description/image) for external embeds when available.
+* Image references: Can forward preview images for link cards to Bsky.
 
 ## Usage and configuration
 
