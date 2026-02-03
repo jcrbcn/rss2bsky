@@ -211,6 +211,15 @@ def main():
             "Template supports {title} and {category}."
         ),
     )
+    parser.add_argument(
+        "--spread-seconds",
+        type=int,
+        default=0,
+        help=(
+            "Spread all posts across this many seconds. "
+            "For example, 600 spreads posts over 10 minutes."
+        ),
+    )
     args = parser.parse_args()
     feed_url = args.rss_feed
     bsky_handle = args.bsky_handle
@@ -220,6 +229,7 @@ def main():
     translate_target = args.translate_target
     translation_pretext = args.translation_pretext
     category_formats = load_category_format_file(args.category_format_file)
+    spread_seconds = max(0, args.spread_seconds)
 
     # --- Login ---
     client = Client()
@@ -239,6 +249,7 @@ def main():
     # --- Parse feed ---
     feed = fastfeedparser.parse(feed_url)
 
+    new_items = []
     for item in feed.entries:
         rss_time = arrow.get(item.published)
         logging.info("RSS Time: %s", str(rss_time))
@@ -277,61 +288,104 @@ def main():
         logging.info("Rich text length: %d" % (len(rich_text.build_text())))
         logging.info("Filtered Content length: %d" % (len(post_text)))
         if rss_time > last_bsky:  # Only post if newer than last Bluesky post
-            # if True:  # FOR TESTING ONLY!
-            link_metadata = fetch_link_metadata(item.link)
-            thumb_blob = None
-            if link_metadata.get("image"):
-                thumb_blob = get_image_blob(link_metadata["image"], client)
-
-            external_embed = None
-            translated_description = None
-            if translate_target and link_metadata.get("description"):
-                translated_description = translate_text(
-                    link_metadata.get("description"), translate_target
-                )
-            if link_metadata.get("title") or link_metadata.get("description"):
-                logging.info("Using link card for %s", item.link)
-                external_embed = models.AppBskyEmbedExternal.Main(
-                    external=models.AppBskyEmbedExternal.External(
-                        uri=link_for_post,
-                        title=translated_title
-                        or link_metadata.get("title")
-                        or title_text
-                        or item.link,
-                        description=translated_description
-                        or link_metadata.get("description")
-                        or "",
-                        thumb=thumb_blob,
-                    )
-                )
-            else:
-                logging.info("No link metadata for %s; skipping card", item.link)
-            embed = external_embed
-            if not embed and thumb_blob:
-                post_text = f"{post_text}\n{link_for_post}"
-                alt_text = (
-                    translated_title
-                    or title_text
-                    or link_metadata.get("title")
-                    or "Preview image"
-                )
-                embed = models.AppBskyEmbedImages.Main(
-                    images=[
-                        models.AppBskyEmbedImages.Image(
-                            alt=alt_text,
-                            image=thumb_blob,
-                        )
-                    ]
-                )
-
-            # Post
-            try:
-                client.send_post(rich_text, embed=embed)
-                logging.info("Sent post %s" % (item.link))
-            except Exception as e:
-                logging.exception("Failed to post %s" % (item.link))
+            new_items.append(
+                {
+                    "rss_time": rss_time,
+                    "item": item,
+                    "post_text": post_text,
+                    "title_text": title_text,
+                    "translated_title": translated_title,
+                    "link_for_post": link_for_post,
+                    "rich_text": rich_text,
+                }
+            )
         else:
             logging.debug("Not sending %s" % (item.link))
+
+    new_items.sort(key=lambda entry: entry["rss_time"])
+    total_items = len(new_items)
+    logging.info("New items to post: %d", total_items)
+    sleep_seconds = 0
+    if spread_seconds and total_items > 1:
+        sleep_seconds = spread_seconds / total_items
+        logging.info(
+            "Spreading posts over %d seconds (%0.2f sec between posts)",
+            spread_seconds,
+            sleep_seconds,
+        )
+
+    posted_count = 0
+    for idx, entry in enumerate(new_items):
+        item = entry["item"]
+        post_text = entry["post_text"]
+        title_text = entry["title_text"]
+        translated_title = entry["translated_title"]
+        link_for_post = entry["link_for_post"]
+        rich_text = entry["rich_text"]
+
+        # if True:  # FOR TESTING ONLY!
+        link_metadata = fetch_link_metadata(item.link)
+        thumb_blob = None
+        if link_metadata.get("image"):
+            thumb_blob = get_image_blob(link_metadata["image"], client)
+
+        external_embed = None
+        translated_description = None
+        if translate_target and link_metadata.get("description"):
+            translated_description = translate_text(
+                link_metadata.get("description"), translate_target
+            )
+        if link_metadata.get("title") or link_metadata.get("description"):
+            logging.info("Using link card for %s", item.link)
+            external_embed = models.AppBskyEmbedExternal.Main(
+                external=models.AppBskyEmbedExternal.External(
+                    uri=link_for_post,
+                    title=translated_title
+                    or link_metadata.get("title")
+                    or title_text
+                    or item.link,
+                    description=translated_description
+                    or link_metadata.get("description")
+                    or "",
+                    thumb=thumb_blob,
+                )
+            )
+        else:
+            logging.info("No link metadata for %s; skipping card", item.link)
+        embed = external_embed
+        if not embed and thumb_blob:
+            post_text = f"{post_text}\n{link_for_post}"
+            alt_text = (
+                translated_title
+                or title_text
+                or link_metadata.get("title")
+                or "Preview image"
+            )
+            embed = models.AppBskyEmbedImages.Main(
+                images=[
+                    models.AppBskyEmbedImages.Image(
+                        alt=alt_text,
+                        image=thumb_blob,
+                    )
+                ]
+            )
+
+        # Post
+        try:
+            client.send_post(rich_text, embed=embed)
+            logging.info("Sent post %s" % (item.link))
+            posted_count += 1
+        except Exception:
+            logging.exception("Failed to post %s" % (item.link))
+            continue
+
+        has_more = idx < total_items - 1
+        if sleep_seconds > 0 and has_more:
+            logging.info(
+                "Sleeping %0.2f seconds before next post",
+                sleep_seconds,
+            )
+            time.sleep(sleep_seconds)
 
 
 if __name__ == "__main__":

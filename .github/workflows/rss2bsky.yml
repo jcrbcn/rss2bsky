@@ -4,26 +4,26 @@ description: "A GitHub Action to post RSS feed items to Bluesky (BSKY) using a P
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/30 * * * *'  # every 30 minutes
+  - cron: '*/30 * * * *' # every 30 minutes
 
 jobs:
   post:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install dependencies
-        run: |
-          pip install atproto fastfeedparser beautifulsoup4 httpx arrow
-      - name: Run script
-        run: |
-          python3 rss2bsky.py "https://www.mundodeportivo.com/feed/rss/home" "${{ secrets.BSKY_HANDLE }}" "${{ secrets.BSKY_USERNAME }}" "${{ secrets.BSKY_APP_PASSWORD }}" --path-only "futbol" --path-only "baloncesto" --category-format-file "format.json"
-      - name: Upload log artifact
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: rss2bsky-log
-          path: rss2bsky.log
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install dependencies
+      run: |
+        pip install atproto fastfeedparser beautifulsoup4 httpx arrow
+    - name: Run script
+      run: |
+        python3 rss2bsky.py "https://www.mundodeportivo.com/feed/rss/home" "${{ secrets.BSKY_HANDLE }}" "${{ secrets.BSKY_USERNAME }}" "${{ secrets.BSKY_APP_PASSWORD }}" --path-only "futbol" --path-only "baloncesto" --category-format-file "format.json" --spread-seconds 600
+    - name: Upload log artifact
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: rss2bsky-log
+        path: rss2bsky.log
