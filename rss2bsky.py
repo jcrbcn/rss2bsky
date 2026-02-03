@@ -131,7 +131,7 @@ def trim_link_description(text, phrase_start_limit=150, total_limit=200):
         return normalized[:phrase_start_limit].rstrip()
 
     combined = " ".join(selected).strip()
-    if len(selected) > 1 and len(combined) > total_limit:
+    while len(selected) > 1 and len(combined) > total_limit:
         selected.pop()
         combined = " ".join(selected).strip()
     return combined
