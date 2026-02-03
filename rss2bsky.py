@@ -146,7 +146,7 @@ def translate_text(text, target_lang):
     target_lang = target_lang.replace("_", "-").upper()
     res = httpx.post(
         "https://api-free.deepl.com/v2/translate",
-        data={"text": text, "target_lang": target_lang},
+        data={"text": text, "source_lang": "ES", "target_lang": target_lang},
         headers={"Authorization": f"DeepL-Auth-Key {auth_key}"},
         timeout=10,
     )
