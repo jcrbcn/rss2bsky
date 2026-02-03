@@ -40,7 +40,7 @@ How it runs:
 
 - Schedule: every 30 minutes via cron
 - Manual: supports `workflow_dispatch` from the GitHub UI
-- Command: `python3 rss2bsky.py https://www.rac1.cat/rss/home.xml ${{ secrets.BSKY_HANDLE }} ${{ secrets.BSKY_USERNAME }} ${{ secrets.BSKY_APP_PASSWORD }}`
+- Command: `python3 rss2bsky.py https://www.mundodeportivo.com/feed/rss/home ${{ secrets.BSKY_HANDLE }} ${{ secrets.BSKY_USERNAME }} ${{ secrets.BSKY_APP_PASSWORD }}`
 
 Setup steps:
 
