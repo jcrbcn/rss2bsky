@@ -1,6 +1,7 @@
 import argparse
 import arrow
-import fastfeedparser
+import fastfeedparser_ext as fastfeedparser
+import json
 import logging
 import os
 import re
@@ -154,6 +155,27 @@ def build_google_translate_url(url, target_lang):
     )
 
 
+def load_category_format_file(file_path):
+    if not file_path:
+        return {}
+    with open(file_path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    return {category.strip(): template for category, template in data.items()}
+
+
+def format_post_text(title_text, category, category_formats):
+    matched_category = None
+    template = None
+    if category in category_formats:
+        matched_category = category
+        template = category_formats[category]
+    if template:
+        return template.format_map(
+            {"title": title_text, "category": matched_category or ""}
+        )
+    return title_text
+
+
 def main():
     # --- Parse command-line arguments ---
     parser = argparse.ArgumentParser(description="Post RSS to Bluesky.")
@@ -180,6 +202,14 @@ def main():
         default="Original: ",
         help='Pretext to add to the translated text (e.g. "Automatic translation - See original:").',
     )
+    parser.add_argument(
+        "--category-format-file",
+        default=None,
+        help=(
+            "Path to a JSON file mapping category to template. "
+            "Template supports {title} and {category}."
+        ),
+    )
     args = parser.parse_args()
     feed_url = args.rss_feed
     bsky_handle = args.bsky_handle
@@ -188,6 +218,7 @@ def main():
     path_only = args.path_only
     translate_target = args.translate_target
     translation_pretext = args.translation_pretext
+    category_formats = load_category_format_file(args.category_format_file)
 
     # --- Login ---
     client = Client()
@@ -223,15 +254,24 @@ def main():
             title_text = BeautifulSoup(item.title, "html.parser").get_text().strip()
         else:
             title_text = item.title.strip()
-        post_text = title_text
+        if item.tags:
+            category = item.tags[0]["term"]
+            logging.info("Category: %s", category)
+        else:
+            category = ""
+        post_text = format_post_text(title_text, category, category_formats)
         translated_title = None
         translated_link = None
         if translate_target:
-            translated_title = translate_text(post_text, translate_target)
-            post_text = f"{translated_title}\n\n{translation_pretext}{item.link}"
+            translated_title = translate_text(title_text, translate_target)
+            translated_post_text = format_post_text(
+                translated_title, category, category_formats
+            )
+            post_text = f"{translated_post_text}\n\n{translation_pretext}{item.link}"
             translated_link = build_google_translate_url(item.link, translate_target)
         link_for_post = translated_link if translated_link else item.link
         logging.info("Title+link used as content: %s", post_text)
+        logging.info("Extracted category: %s", category)
         rich_text = make_rich(post_text)
         logging.info("Rich text length: %d" % (len(rich_text.build_text())))
         logging.info("Filtered Content length: %d" % (len(post_text)))
@@ -284,11 +324,11 @@ def main():
                 )
 
             # Post
-            try:
-                client.send_post(rich_text, embed=embed)
-                logging.info("Sent post %s" % (item.link))
-            except Exception as e:
-                logging.exception("Failed to post %s" % (item.link))
+            # try:
+            #     client.send_post(rich_text, embed=embed)
+            #     logging.info("Sent post %s" % (item.link))
+            # except Exception as e:
+            #     logging.exception("Failed to post %s" % (item.link))
         else:
             logging.debug("Not sending %s" % (item.link))
 
