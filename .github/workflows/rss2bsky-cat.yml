@@ -20,7 +20,7 @@ jobs:
         pip install atproto fastfeedparser beautifulsoup4 httpx arrow
     - name: Run script
       run: |
-        python3 rss2bsky.py "https://www.mundodeportivo.com/feed/rss/home" "${{ secrets.BSKY_HANDLE_CAT }}" "${{ secrets.BSKY_USERNAME_CAT }}" "${{ secrets.BSKY_APP_PASSWORD }}" --path-only "futbol" --path-only "baloncesto" --translate-target "CA" --translation-pretext "Traducció automàtica - Original: " --category-format-file "format.json" --spread-seconds 600
+        python3 rss2bsky.py "https://www.mundodeportivo.com/feed/rss/home" "${{ secrets.BSKY_HANDLE_CAT }}" "${{ secrets.BSKY_USERNAME_CAT }}" "${{ secrets.BSKY_APP_PASSWORD }}" --path-only "futbol" --path-only "baloncesto" --translate-source "ES" --translate-target "CA" --translation-pretext "Traducció automàtica - Original: " --category-format-file "format.json" --spread-seconds 600
       env:
         DEEPL_AUTH_KEY: ${{ secrets.DEEPL_AUTH_KEY }}
     - name: Upload log artifact
