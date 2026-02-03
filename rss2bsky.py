@@ -59,6 +59,7 @@ def get_last_bsky(client, handle):
 
 def make_rich(content):
     url_pattern = re.compile(r"https?://[^\s]+")
+    hashtag_pattern = re.compile(r"(#[^\W_]+)", flags=re.UNICODE)
     text_builder = client_utils.TextBuilder()
     lines = content.split("\n")
     for line in lines:
@@ -67,7 +68,7 @@ def make_rich(content):
         for match in url_pattern.finditer(line):
             before = line[cursor : match.start()]
             if before:
-                tag_split = re.split("(#[a-zA-Z0-9]+)", before)
+                tag_split = hashtag_pattern.split(before)
                 for t in tag_split:
                     if t.startswith("#"):
                         text_builder.tag(t, t[1:].strip())
@@ -79,7 +80,7 @@ def make_rich(content):
 
         tail = line[cursor:]
         if tail:
-            tag_split = re.split("(#[a-zA-Z0-9]+)", tail)
+            tag_split = hashtag_pattern.split(tail)
             for t in tag_split:
                 if t.startswith("#"):
                     text_builder.tag(t, t[1:].strip())
