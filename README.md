@@ -1,5 +1,4 @@
-RSS to Bluesky - in Python
---------------------------
+## RSS to Bluesky - in Python
 
 This is a proof-of-concept implementation for posting RSS/Atom content to Bluesky. Some hacking may be required. Issues and pull requests welcome to improve the system.
 
@@ -9,7 +8,6 @@ This is a proof-of-concept implementation for posting RSS/Atom content to Bluesk
 * [atproto](https://github.com/MarshalX/atproto) - AT protocol implementation for Python. The API of the library is still unstable, but the version is pinned in requirements.txt
 * [fastfeedparser](https://github.com/kagisearch/fastfeedparser) - For feed parsing with a unified API
 * [httpx](https://www.python-httpx.org/) - For grabbing remote media
-
 
 ## Features:
 
@@ -22,14 +20,33 @@ This is a proof-of-concept implementation for posting RSS/Atom content to Bluesk
 ## Usage and configuration
 
 1. Start by installing the required libraries `pip install -r requirements.txt`
-2. Copy the configuration file and then edit it `cp config.json.sample config.json`
-3. Run the script like `python rss2bsky.py`
+2. Run the script with command-line arguments:
 
-The configuration file accepts the configuration of:
+`python rss2bsky.py <rss_feed_url> <bsky_handle> <bsky_username> <bsky_app_password>`
 
-* a feed URL
-* bsky parameters for a handle, username, and password
-  * Handle is like name.bsky.social
-  * Username is the email address associated with the account.
-  * Password is your password. If you have a literal quote it can be escaped with a backslash like `\"`
-* sleep - the amount of time to sleep while running
+Arguments:
+
+* `rss_feed_url`: RSS/Atom feed URL
+* `bsky_handle`: Handle like `name.bsky.social`
+* `bsky_username`: Email address associated with the account
+* `bsky_app_password`: App password for the account
+
+## GitHub Actions pipeline
+
+This repo includes a scheduled GitHub Actions workflow at `.github/workflows/rss2bsky.yml`.
+Create your own copy and structure to the desired RSS feeds you want to post.
+
+How it runs:
+
+- Schedule: every 30 minutes via cron
+- Manual: supports `workflow_dispatch` from the GitHub UI
+- Command: `python3 rss2bsky.py https://www.rac1.cat/rss/home.xml ${{ secrets.BSKY_HANDLE }} ${{ secrets.BSKY_USERNAME }} ${{ secrets.BSKY_APP_PASSWORD }}`
+
+Setup steps:
+
+1. In your GitHub repo settings, add these secrets:
+   - `BSKY_HANDLE`
+   - `BSKY_USERNAME`
+   - `BSKY_APP_PASSWORD`
+2. Optionally adjust the RSS feed URL and cron settings in `.github/workflows/rss2bsky.yml`.
+3. Add extra pipelines to post from different RSS feeds in the same account

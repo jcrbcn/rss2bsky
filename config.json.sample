@@ -1,9 +1,0 @@
-{
-  "feed": "",
-  "bsky": {
-    "handle": "yourhandle.bsky.social",
-    "username": "username@bsky.com",
-    "password": "app-password-nicely-written"
-  },
-  "sleep": 60
-}
