@@ -30,6 +30,7 @@ Arguments:
 * `bsky_handle`: Handle like `name.bsky.social`
 * `bsky_username`: Email address associated with the account
 * `bsky_app_password`: App password for the account
+* `--translate-target`: Optional target language for DeepL (e.g. `ca`); requires `DEEPL_AUTH_KEY` in the environment
 
 ## GitHub Actions pipeline
 
@@ -38,15 +39,20 @@ Create your own copy and structure to the desired RSS feeds you want to post.
 
 How it runs:
 
-- Schedule: every 30 minutes via cron
-- Manual: supports `workflow_dispatch` from the GitHub UI
-- Command: `python3 rss2bsky.py https://www.mundodeportivo.com/feed/rss/home ${{ secrets.BSKY_HANDLE }} ${{ secrets.BSKY_USERNAME }} ${{ secrets.BSKY_APP_PASSWORD }}`
+* Schedule: every 30 minutes via cron
+* Manual: supports `workflow_dispatch` from the GitHub UI
+* Command: `python3 rss2bsky.py https://www.mundodeportivo.com/feed/rss/home ${{ secrets.BSKY_HANDLE }} ${{ secrets.BSKY_USERNAME }} ${{ secrets.BSKY_APP_PASSWORD }}`
 
 Setup steps:
 
 1. In your GitHub repo settings, add these secrets:
-   - `BSKY_HANDLE`
-   - `BSKY_USERNAME`
-   - `BSKY_APP_PASSWORD`
+   * `BSKY_HANDLE`
+   * `BSKY_USERNAME`
+   * `BSKY_APP_PASSWORD`
+   * `DEEPL_AUTH_KEY` (only required if you use `--translate-target`)
 2. Optionally adjust the RSS feed URL and cron settings in `.github/workflows/rss2bsky.yml`.
 3. Add extra pipelines to post from different RSS feeds in the same account
+
+## DEEPL API Integration
+
+To run translations, you need a free account on https://www.deepl.com/

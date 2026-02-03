@@ -2,12 +2,13 @@ import argparse
 import arrow
 import fastfeedparser
 import logging
+import os
 import re
 import httpx
 import time
 from atproto import Client, client_utils, models
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 # --- Logging ---
 LOG_PATH = "rss2bsky.log"
@@ -56,22 +57,35 @@ def get_last_bsky(client, handle):
 
 
 def make_rich(content):
+    url_pattern = re.compile(r"https?://[^\s]+")
     text_builder = client_utils.TextBuilder()
     lines = content.split("\n")
     for line in lines:
-        # If the line is a URL, make it a clickable link
-        if line.startswith("http"):
-            url = line.strip()
+        # Identify URLs anywhere in the line and hyperlink them.
+        cursor = 0
+        for match in url_pattern.finditer(line):
+            before = line[cursor : match.start()]
+            if before:
+                tag_split = re.split("(#[a-zA-Z0-9]+)", before)
+                for t in tag_split:
+                    if t.startswith("#"):
+                        text_builder.tag(t, t[1:].strip())
+                    else:
+                        text_builder.text(t)
+            url = match.group(0)
             text_builder.link(url, url)
-        else:
-            tag_split = re.split("(#[a-zA-Z0-9]+)", line)
-            for i, t in enumerate(tag_split):
-                if i == len(tag_split) - 1:
-                    t = t + "\n"
+            cursor = match.end()
+
+        tail = line[cursor:]
+        if tail:
+            tag_split = re.split("(#[a-zA-Z0-9]+)", tail)
+            for t in tag_split:
                 if t.startswith("#"):
                     text_builder.tag(t, t[1:].strip())
                 else:
                     text_builder.text(t)
+
+        text_builder.text("\n")
     return text_builder
 
 
@@ -90,6 +104,56 @@ def is_html(text):
     return bool(re.search(r"<.*?>", text))
 
 
+def translate_text(text, target_lang):
+    if not text or not target_lang:
+        return text
+    auth_key = os.environ.get("DEEPL_AUTH_KEY")
+    if not auth_key:
+        raise ValueError("DEEPL_AUTH_KEY is required for translation.")
+    target_lang = target_lang.replace("_", "-").upper()
+    res = httpx.post(
+        "https://api-free.deepl.com/v2/translate",
+        data={"text": text, "target_lang": target_lang},
+        headers={"Authorization": f"DeepL-Auth-Key {auth_key}"},
+        timeout=10,
+    )
+    res.raise_for_status()
+    data = res.json()
+    translations = data.get("translations") or []
+    translated = translations[0].get("text") if translations else None
+    if not translated:
+        raise ValueError("DeepL returned no translated text.")
+    return translated
+
+
+def build_google_translate_url(url, target_lang):
+    if not url or not target_lang:
+        return url
+    parsed = urlparse(url)
+    if not parsed.netloc:
+        return url
+    translated_host = f"{parsed.netloc.replace('.', '-')}.translate.goog"
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query.update(
+        {
+            "_x_tr_sl": "auto",
+            "_x_tr_tl": target_lang,
+            "_x_tr_hl": target_lang,
+            "_x_tr_pto": "wapp",
+        }
+    )
+    return urlunparse(
+        (
+            "https",
+            translated_host,
+            parsed.path,
+            parsed.params,
+            urlencode(query),
+            parsed.fragment,
+        )
+    )
+
+
 def main():
     # --- Parse command-line arguments ---
     parser = argparse.ArgumentParser(description="Post RSS to Bluesky.")
@@ -106,12 +170,24 @@ def main():
             "e.g. --path-only futbol --path-only basket)"
         ),
     )
+    parser.add_argument(
+        "--translate-target",
+        default=None,
+        help='Translate post text to target language (e.g. "ca"). Requires DEEPL_AUTH_KEY.',
+    )
+    parser.add_argument(
+        "--translation-pretext",
+        default="Original: ",
+        help='Pretext to add to the translated text (e.g. "Automatic translation - See original:").',
+    )
     args = parser.parse_args()
     feed_url = args.rss_feed
     bsky_handle = args.bsky_handle
     bsky_username = args.bsky_username
     bsky_password = args.bsky_app_password
     path_only = args.path_only
+    translate_target = args.translate_target
+    translation_pretext = args.translation_pretext
 
     # --- Login ---
     client = Client()
@@ -148,6 +224,13 @@ def main():
         else:
             title_text = item.title.strip()
         post_text = title_text
+        translated_title = None
+        translated_link = None
+        if translate_target:
+            translated_title = translate_text(post_text, translate_target)
+            post_text = f"{translated_title}\n{translation_pretext}{item.link}"
+            translated_link = build_google_translate_url(item.link, translate_target)
+        link_for_post = translated_link if translated_link else item.link
         logging.info("Title+link used as content: %s", post_text)
         rich_text = make_rich(post_text)
         logging.info("Rich text length: %d" % (len(rich_text.build_text())))
@@ -160,13 +243,23 @@ def main():
                 thumb_blob = get_image_blob(link_metadata["image"], client)
 
             external_embed = None
+            translated_description = None
+            if translate_target and link_metadata.get("description"):
+                translated_description = translate_text(
+                    link_metadata.get("description"), translate_target
+                )
             if link_metadata.get("title") or link_metadata.get("description"):
                 logging.info("Using link card for %s", item.link)
                 external_embed = models.AppBskyEmbedExternal.Main(
                     external=models.AppBskyEmbedExternal.External(
-                        uri=item.link,
-                        title=link_metadata.get("title") or title_text or item.link,
-                        description=link_metadata.get("description") or "",
+                        uri=link_for_post,
+                        title=translated_title
+                        or link_metadata.get("title")
+                        or title_text
+                        or item.link,
+                        description=translated_description
+                        or link_metadata.get("description")
+                        or "",
                         thumb=thumb_blob,
                     )
                 )
@@ -174,8 +267,13 @@ def main():
                 logging.info("No link metadata for %s; skipping card", item.link)
             embed = external_embed
             if not embed and thumb_blob:
-                post_text = f"{post_text}\n{item.link}"
-                alt_text = title_text or link_metadata.get("title") or "Preview image"
+                post_text = f"{post_text}\n{link_for_post}"
+                alt_text = (
+                    translated_title
+                    or title_text
+                    or link_metadata.get("title")
+                    or "Preview image"
+                )
                 embed = models.AppBskyEmbedImages.Main(
                     images=[
                         models.AppBskyEmbedImages.Image(
