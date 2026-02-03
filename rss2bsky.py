@@ -312,7 +312,9 @@ def main():
         translated_title = None
         translated_link = None
         if translate_target:
-            translated_title = translate_text(title_text, translate_source, translate_target)
+            translated_title = translate_text(
+                title_text, translate_source, translate_target
+            )
             translated_post_text = format_post_text(
                 translated_title, category, category_formats
             )
@@ -370,6 +372,7 @@ def main():
         if translate_target and link_metadata.get("description"):
             translated_description = translate_text(
                 trim_link_description(link_metadata.get("description")),
+                translate_source,
                 translate_target,
             )
         if link_metadata.get("title") or link_metadata.get("description"):
