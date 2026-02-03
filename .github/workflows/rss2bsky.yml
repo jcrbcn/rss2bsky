@@ -21,3 +21,9 @@ jobs:
       - name: Run script
         run: |
           python3 rss2bsky.py "https://www.mundodeportivo.com/feed/rss/home" "${{ secrets.BSKY_HANDLE }}" "${{ secrets.BSKY_USERNAME }}" "${{ secrets.BSKY_APP_PASSWORD }}" --path-only "futbol" --path-only "baloncesto"
+      - name: Upload log artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rss2bsky-log
+          path: rss2bsky.log

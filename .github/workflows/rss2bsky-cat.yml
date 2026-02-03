@@ -4,7 +4,7 @@ description: "A GitHub Action to post RSS feed items to Bluesky (BSKY) using a P
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/30 * * * *'  # every 30 minutes
+  - cron: '*/30 * * * *' # every 30 minutes
 
 jobs:
   post:
@@ -23,3 +23,9 @@ jobs:
         python3 rss2bsky.py "https://www.mundodeportivo.com/feed/rss/home" "${{ secrets.BSKY_HANDLE_CAT }}" "${{ secrets.BSKY_USERNAME_CAT }}" "${{ secrets.BSKY_APP_PASSWORD }}" --path-only "futbol" --path-only "baloncesto" --translate-target "CA" --translation-pretext "Traducció automàtica - Original: "
       env:
         DEEPL_AUTH_KEY: ${{ secrets.DEEPL_AUTH_KEY }}
+    - name: Upload log artifact
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: rss2bsky-cat-log
+        path: rss2bsky.log
