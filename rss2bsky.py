@@ -228,7 +228,7 @@ def main():
         translated_link = None
         if translate_target:
             translated_title = translate_text(post_text, translate_target)
-            post_text = f"{translated_title}\n{translation_pretext}{item.link}"
+            post_text = f"{translated_title}\n\n{translation_pretext}{item.link}"
             translated_link = build_google_translate_url(item.link, translate_target)
         link_for_post = translated_link if translated_link else item.link
         logging.info("Title+link used as content: %s", post_text)
