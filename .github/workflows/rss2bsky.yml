@@ -4,7 +4,7 @@ description: "A GitHub Action to post RSS feed items to Bluesky (BSKY) using a P
 on:
   workflow_dispatch:
   schedule:
-  - cron: '*/30 * * * *' # every 30 minutes
+  - cron: '*/10 * * * *' # every 10 minutes
 
 jobs:
   post:
