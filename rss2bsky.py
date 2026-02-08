@@ -1,30 +1,66 @@
+from __future__ import annotations
+
 import argparse
-import arrow
-import fastfeedparser_ext as fastfeedparser
 import json
 import logging
 import os
 import re
-import httpx
+import sys
 import time
-from atproto import Client, client_utils, models
-from bs4 import BeautifulSoup
+from dataclasses import dataclass
+from typing import Any, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-# --- Logging ---
-LOG_PATH = "rss2bsky.log"
+import arrow
+import fastfeedparser_ext as fastfeedparser
+import httpx
+from atproto import Client, client_utils, models
+from bs4 import BeautifulSoup
+
+# From environment: when "true", skip posting and image uploads (dry run).
+DEBUG_MODE = os.environ.get("DEBUG_MODE", "false").lower() == "true"
+
+# Constants for trim_link_description
+PHRASE_START_LIMIT = 150
+TOTAL_DESC_LIMIT = 200
+
+# Login retry backoff (seconds)
+LOGIN_BACKOFF_INITIAL = 60
+LOGIN_BACKOFF_MAX = 600
+
+# HTTP timeouts (seconds)
+HTTP_TIMEOUT = 10
+
+# --- Logging (stderr so it appears in GitHub Actions / console) ---
 logging.basicConfig(
     format="%(asctime)s %(message)s",
-    filename=LOG_PATH,
-    encoding="utf-8",
+    stream=sys.stderr,
     level=logging.INFO,
 )
 
 
-def fetch_link_metadata(url):
+@dataclass
+class PendingPost:
+    """One feed item prepared for posting: text, link, rich text, and optional translation."""
+
+    rss_time: arrow.Arrow
+    item: Any  # feed entry from fastfeedparser
+    post_text: str
+    title_text: str
+    translated_title: Optional[str]
+    link_for_post: str
+    rich_text: Any  # TextBuilder from make_rich()
+
+
+def fetch_link_metadata(url: str) -> dict[str, Any]:
+    """Fetch Open Graph / meta title, description, and image from a URL. Returns a dict with keys title, description, image (or empty dict on error)."""
     try:
-        r = httpx.get(url, timeout=10)
+        r = httpx.get(url, timeout=HTTP_TIMEOUT)
         r.raise_for_status()
+    except httpx.HTTPError as e:
+        logging.warning("Could not fetch link metadata for %s: %s", url, e)
+        return {}
+    try:
         soup = BeautifulSoup(r.text, "html.parser")
         title = soup.find("meta", property="og:title") or soup.find("title")
         desc = soup.find("meta", property="og:description") or soup.find(
@@ -43,11 +79,12 @@ def fetch_link_metadata(url):
             "image": image["content"] if image and image.has_attr("content") else None,
         }
     except Exception as e:
-        logging.warning(f"Could not fetch link metadata for {url}: {e}")
+        logging.warning("Could not parse link metadata for %s: %s", url, e)
         return {}
 
 
-def get_last_bsky(client, handle):
+def get_last_bsky(client: Client, handle: str) -> arrow.Arrow:
+    """Return the creation time of the most recent top-level post by the given handle, or epoch if none."""
     timeline = client.get_author_feed(handle)
     for titem in timeline.feed:
         # Only care about top-level, non-reply posts
@@ -57,7 +94,8 @@ def get_last_bsky(client, handle):
     return arrow.get(0)
 
 
-def make_rich(content):
+def make_rich(content: str):
+    """Build atproto TextBuilder with links and hashtags from plain text. Returns a TextBuilder instance."""
     url_pattern = re.compile(r"https?://[^\s]+")
     hashtag_pattern = re.compile(r"(#[^\W_]+)", flags=re.UNICODE)
     text_builder = client_utils.TextBuilder()
@@ -91,22 +129,31 @@ def make_rich(content):
     return text_builder
 
 
-def get_image_blob(image_url, client):
+def get_image_blob(image_url: str, client: Client) -> Optional[Any]:
+    """Download image from URL and upload as Bluesky blob; returns blob or None on failure or in DEBUG_MODE."""
+    if DEBUG_MODE:
+        return None
     try:
-        r = httpx.get(image_url)
+        r = httpx.get(image_url, timeout=HTTP_TIMEOUT)
         if r.status_code != 200:
             return None
         return client.upload_blob(r.content).blob
     except Exception as e:
-        logging.warning(f"Could not fetch/upload image from {image_url}: {e}")
+        logging.warning("Could not fetch/upload image from %s: %s", image_url, e)
         return None
 
 
-def is_html(text):
+def is_html(text: str) -> bool:
+    """Return True if the string contains HTML-like tags."""
     return bool(re.search(r"<.*?>", text))
 
 
-def trim_link_description(text, phrase_start_limit=150, total_limit=200):
+def trim_link_description(
+    text: Optional[str],
+    phrase_start_limit: int = PHRASE_START_LIMIT,
+    total_limit: int = TOTAL_DESC_LIMIT,
+) -> Optional[str]:
+    """Trim description to whole phrases: include phrases starting within phrase_start_limit chars, then trim to total_limit. Returns None or empty if input is falsy."""
     if not text:
         return text
     normalized = re.sub(r"\s+", " ", text).strip()
@@ -137,7 +184,8 @@ def trim_link_description(text, phrase_start_limit=150, total_limit=200):
     return combined
 
 
-def translate_text(text, source_lang, target_lang):
+def translate_text(text: str, source_lang: str, target_lang: str) -> str:
+    """Translate text via DeepL API. Requires DEEPL_AUTH_KEY. Returns original text if no target_lang or no text."""
     if not text or not target_lang:
         return text
     auth_key = os.environ.get("DEEPL_AUTH_KEY")
@@ -148,7 +196,7 @@ def translate_text(text, source_lang, target_lang):
         "https://api-free.deepl.com/v2/translate",
         data={"text": text, "source_lang": source_lang, "target_lang": target_lang},
         headers={"Authorization": f"DeepL-Auth-Key {auth_key}"},
-        timeout=10,
+        timeout=HTTP_TIMEOUT,
     )
     res.raise_for_status()
     data = res.json()
@@ -159,7 +207,8 @@ def translate_text(text, source_lang, target_lang):
     return translated
 
 
-def build_google_translate_url(url, target_lang):
+def build_google_translate_url(url: str, target_lang: str) -> str:
+    """Build a Google Translate URL that shows the given URL translated to target_lang. Returns original url if no target_lang."""
     if not url or not target_lang:
         return url
     parsed = urlparse(url)
@@ -187,15 +236,23 @@ def build_google_translate_url(url, target_lang):
     )
 
 
-def load_category_format_file(file_path):
+def load_category_format_file(file_path: Optional[str]) -> dict[str, str]:
+    """Load JSON file mapping category name to format string (supports {title} and {category}). Returns empty dict if no path or on read/parse error."""
     if not file_path:
         return {}
-    with open(file_path, "r", encoding="utf-8") as handle:
-        data = json.load(handle)
-    return {category.strip(): template for category, template in data.items()}
+    try:
+        with open(file_path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return {category.strip(): template for category, template in data.items()}
+    except (OSError, json.JSONDecodeError) as e:
+        logging.warning("Could not load category format file %s: %s", file_path, e)
+        return {}
 
 
-def format_post_text(title_text, category, category_formats):
+def format_post_text(
+    title_text: str, category: str, category_formats: dict[str, str]
+) -> str:
+    """Format post text using category_formats template for category if present; otherwise return title_text. Templates support {title} and {category}."""
     matched_category = None
     template = None
     if category in category_formats:
@@ -208,8 +265,8 @@ def format_post_text(title_text, category, category_formats):
     return title_text
 
 
-def main():
-    # --- Parse command-line arguments ---
+def parse_args() -> argparse.Namespace:
+    """Build and parse command-line arguments. Returns the parsed namespace."""
     parser = argparse.ArgumentParser(description="Post RSS to Bluesky.")
     parser.add_argument("rss_feed", help="RSS feed URL")
     parser.add_argument("bsky_handle", help="Bluesky handle")
@@ -256,7 +313,188 @@ def main():
             "For example, 600 spreads posts over 10 minutes."
         ),
     )
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def create_client(username: str, password: str) -> Client:
+    """Log in to Bluesky with retry and exponential backoff. Returns authenticated Client."""
+    client = Client()
+    backoff = LOGIN_BACKOFF_INITIAL
+    while True:
+        try:
+            client.login(username, password)
+            return client
+        except Exception:
+            logging.exception("Login exception")
+            time.sleep(backoff)
+            backoff = min(backoff + LOGIN_BACKOFF_INITIAL, LOGIN_BACKOFF_MAX)
+
+
+def fetch_new_feed_items(
+    feed_url: str,
+    path_only: list[str],
+    last_bsky: arrow.Arrow,
+    category_formats: dict[str, str],
+    translate_source: str,
+    translate_target: Optional[str],
+    translation_pretext: str,
+) -> list[PendingPost]:
+    """Parse feed, filter by path and time, apply formatting and translation. Returns list of PendingPost sorted by rss_time."""
+    feed = fastfeedparser.parse(feed_url)
+    new_items: list[PendingPost] = []
+    for item in feed.entries:
+        rss_time = arrow.get(item.published)
+        if path_only:
+            item_path = urlparse(item.link).path.lstrip("/")
+            if not any(
+                item_path == prefix or item_path.startswith(f"{prefix}/")
+                for prefix in path_only
+            ):
+                continue
+        logging.info("--------------------------------")
+        logging.info("RSS Time: %s", str(rss_time))
+        logging.info("Item: %s", item.title)
+        logging.info("Item link: %s", item.link)
+        if is_html(item.title):
+            title_text = BeautifulSoup(item.title, "html.parser").get_text().strip()
+        else:
+            title_text = item.title.strip()
+        category = item.tags[0]["term"] if item.tags else ""
+        post_text = format_post_text(title_text, category, category_formats)
+        translated_title: Optional[str] = None
+        translated_link: Optional[str] = None
+        if translate_target:
+            translated_title = translate_text(
+                title_text, translate_source, translate_target
+            )
+            translated_post_text = format_post_text(
+                translated_title, category, category_formats
+            )
+            post_text = f"{translated_post_text}\n\n{translation_pretext}{item.link}"
+            translated_link = build_google_translate_url(item.link, translate_target)
+        link_for_post = translated_link if translated_link else item.link
+        rich_text = make_rich(post_text)
+        if rss_time > last_bsky:
+            new_items.append(
+                PendingPost(
+                    rss_time=rss_time,
+                    item=item,
+                    post_text=post_text,
+                    title_text=title_text,
+                    translated_title=translated_title,
+                    link_for_post=link_for_post,
+                    rich_text=rich_text,
+                )
+            )
+        else:
+            logging.debug("Not sending %s", item.link)
+    new_items.sort(key=lambda e: e.rss_time)
+    return new_items
+
+
+def build_embed(
+    entry: PendingPost,
+    client: Client,
+    translate_target: Optional[str],
+    translate_source: str,
+) -> Optional[Any]:
+    """Build external link card or image embed for the post. Returns None if no embed available."""
+    link_metadata = fetch_link_metadata(entry.item.link)
+    thumb_blob = None
+    if link_metadata.get("image"):
+        thumb_blob = get_image_blob(link_metadata["image"], client)
+    external_embed = None
+    translated_description = None
+    if translate_target and link_metadata.get("description"):
+        translated_description = translate_text(
+            trim_link_description(link_metadata.get("description")),
+            translate_source,
+            translate_target,
+        )
+    if link_metadata.get("title") or link_metadata.get("description"):
+        external_embed = models.AppBskyEmbedExternal.Main(
+            external=models.AppBskyEmbedExternal.External(
+                uri=entry.link_for_post,
+                title=(
+                    entry.translated_title
+                    or link_metadata.get("title")
+                    or entry.title_text
+                    or entry.item.link
+                ),
+                description=(
+                    translated_description
+                    or link_metadata.get("description")
+                    or ""
+                ),
+                thumb=thumb_blob,
+            )
+        )
+    else:
+        logging.info("No link metadata for %s; skipping card", entry.item.link)
+    embed = external_embed
+    if not embed and thumb_blob and not DEBUG_MODE:
+        alt_text = (
+            entry.translated_title
+            or entry.title_text
+            or link_metadata.get("title")
+            or "Preview image"
+        )
+        embed = models.AppBskyEmbedImages.Main(
+            images=[
+                models.AppBskyEmbedImages.Image(
+                    alt=alt_text,
+                    image=thumb_blob,
+                )
+            ]
+        )
+    return embed
+
+
+def run_posting_loop(
+    items: list[PendingPost],
+    client: Client,
+    spread_seconds: float,
+    translate_target: Optional[str],
+    translate_source: str,
+) -> None:
+    """Post each item to Bluesky (unless DEBUG_MODE), with optional delay between posts. For image-only embeds, appends link to content."""
+    total_items = len(items)
+    logging.info("New items to post: %d", total_items)
+    sleep_seconds = 0.0
+    if spread_seconds > 0 and total_items > 1:
+        sleep_seconds = spread_seconds / total_items
+        logging.info(
+            "Spreading posts over %d seconds (%0.2f sec between posts)",
+            int(spread_seconds),
+            sleep_seconds,
+        )
+    for idx, entry in enumerate(items):
+        embed = build_embed(entry, client, translate_target, translate_source)
+        # When we have image-only embed (no external card), include link in the text we send
+        if embed is not None and getattr(embed, "images", None) is not None:
+            rich_text = make_rich(entry.post_text + "\n" + entry.link_for_post)
+        else:
+            rich_text = entry.rich_text
+
+        if not DEBUG_MODE:
+            try:
+                client.send_post(rich_text, embed=embed)
+                logging.info("Sent post %s", entry.item.link)
+            except Exception:
+                logging.exception("Failed to post %s", entry.item.link)
+                continue
+        else:
+            logging.info("DEBUG_MODE: skipping post %s", entry.item.link)
+
+        has_more = idx < total_items - 1
+        if sleep_seconds > 0 and has_more:
+            logging.info("Sleeping %0.2f seconds before next post", sleep_seconds)
+            time.sleep(sleep_seconds)
+
+
+def main() -> None:
+    """Entry point: parse args, login, fetch new items, run posting loop."""
+    args = parse_args()
     feed_url = args.rss_feed
     bsky_handle = args.bsky_handle
     bsky_username = args.bsky_username
@@ -268,164 +506,27 @@ def main():
     category_formats = load_category_format_file(args.category_format_file)
     spread_seconds = max(0, args.spread_seconds)
 
-    # --- Login ---
-    client = Client()
-    backoff = 60
-    while True:
-        try:
-            client.login(bsky_username, bsky_password)
-            break
-        except Exception as e:
-            logging.exception("Login exception")
-            time.sleep(backoff)
-            backoff = min(backoff + 60, 600)
+    if DEBUG_MODE:
+        logging.info("Optional parameters:")
+        logging.info("Path Only: %s", path_only)
+        logging.info("Translate Target: %s", translate_target)
+        logging.info("Translate Source: %s", translate_source)
+        logging.info("Translation Pretext: %s", translation_pretext)
 
-    # --- Get last Bluesky post time ---
+    client = create_client(bsky_username, bsky_password)
     last_bsky = get_last_bsky(client, bsky_handle)
-
-    # --- Parse feed ---
-    feed = fastfeedparser.parse(feed_url)
-
-    new_items = []
-    for item in feed.entries:
-        rss_time = arrow.get(item.published)
-        logging.info("RSS Time: %s", str(rss_time))
-        if path_only:
-            item_path = urlparse(item.link).path.lstrip("/")
-            if not any(
-                item_path == prefix or item_path.startswith(f"{prefix}/")
-                for prefix in path_only
-            ):
-                logging.debug("Skipping %s due to path filter %s", item.link, path_only)
-                continue
-        # Use only the plain title as content, and add the link on a new line
-        if is_html(item.title):
-            title_text = BeautifulSoup(item.title, "html.parser").get_text().strip()
-        else:
-            title_text = item.title.strip()
-        if item.tags:
-            category = item.tags[0]["term"]
-            logging.info("Category: %s", category)
-        else:
-            category = ""
-        post_text = format_post_text(title_text, category, category_formats)
-        translated_title = None
-        translated_link = None
-        if translate_target:
-            translated_title = translate_text(
-                title_text, translate_source, translate_target
-            )
-            translated_post_text = format_post_text(
-                translated_title, category, category_formats
-            )
-            post_text = f"{translated_post_text}\n\n{translation_pretext}{item.link}"
-            translated_link = build_google_translate_url(item.link, translate_target)
-        link_for_post = translated_link if translated_link else item.link
-        logging.info("Title+link used as content: %s", post_text)
-        logging.info("Extracted category: %s", category)
-        rich_text = make_rich(post_text)
-        logging.info("Rich text length: %d" % (len(rich_text.build_text())))
-        logging.info("Filtered Content length: %d" % (len(post_text)))
-        if rss_time > last_bsky:  # Only post if newer than last Bluesky post
-            new_items.append(
-                {
-                    "rss_time": rss_time,
-                    "item": item,
-                    "post_text": post_text,
-                    "title_text": title_text,
-                    "translated_title": translated_title,
-                    "link_for_post": link_for_post,
-                    "rich_text": rich_text,
-                }
-            )
-        else:
-            logging.debug("Not sending %s" % (item.link))
-
-    new_items.sort(key=lambda entry: entry["rss_time"])
-    total_items = len(new_items)
-    logging.info("New items to post: %d", total_items)
-    sleep_seconds = 0
-    if spread_seconds and total_items > 1:
-        sleep_seconds = spread_seconds / total_items
-        logging.info(
-            "Spreading posts over %d seconds (%0.2f sec between posts)",
-            spread_seconds,
-            sleep_seconds,
-        )
-
-    posted_count = 0
-    for idx, entry in enumerate(new_items):
-        item = entry["item"]
-        post_text = entry["post_text"]
-        title_text = entry["title_text"]
-        translated_title = entry["translated_title"]
-        link_for_post = entry["link_for_post"]
-        rich_text = entry["rich_text"]
-
-        link_metadata = fetch_link_metadata(item.link)
-        thumb_blob = None
-        if link_metadata.get("image"):
-            thumb_blob = get_image_blob(link_metadata["image"], client)
-
-        external_embed = None
-        translated_description = None
-        if translate_target and link_metadata.get("description"):
-            translated_description = translate_text(
-                trim_link_description(link_metadata.get("description")),
-                translate_source,
-                translate_target,
-            )
-        if link_metadata.get("title") or link_metadata.get("description"):
-            logging.info("Using link card for %s", item.link)
-            external_embed = models.AppBskyEmbedExternal.Main(
-                external=models.AppBskyEmbedExternal.External(
-                    uri=link_for_post,
-                    title=translated_title
-                    or link_metadata.get("title")
-                    or title_text
-                    or item.link,
-                    description=translated_description
-                    or link_metadata.get("description")
-                    or "",
-                    thumb=thumb_blob,
-                )
-            )
-        else:
-            logging.info("No link metadata for %s; skipping card", item.link)
-        embed = external_embed
-        if not embed and thumb_blob:
-            post_text = f"{post_text}\n{link_for_post}"
-            alt_text = (
-                translated_title
-                or title_text
-                or link_metadata.get("title")
-                or "Preview image"
-            )
-            embed = models.AppBskyEmbedImages.Main(
-                images=[
-                    models.AppBskyEmbedImages.Image(
-                        alt=alt_text,
-                        image=thumb_blob,
-                    )
-                ]
-            )
-
-        # Post
-        try:
-            client.send_post(rich_text, embed=embed)
-            logging.info("Sent post %s" % (item.link))
-            posted_count += 1
-        except Exception:
-            logging.exception("Failed to post %s" % (item.link))
-            continue
-
-        has_more = idx < total_items - 1
-        if sleep_seconds > 0 and has_more:
-            logging.info(
-                "Sleeping %0.2f seconds before next post",
-                sleep_seconds,
-            )
-            time.sleep(sleep_seconds)
+    new_items = fetch_new_feed_items(
+        feed_url,
+        path_only,
+        last_bsky,
+        category_formats,
+        translate_source,
+        translate_target,
+        translation_pretext,
+    )
+    run_posting_loop(
+        new_items, client, spread_seconds, translate_target, translate_source
+    )
 
 
 if __name__ == "__main__":

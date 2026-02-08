@@ -4,7 +4,7 @@ description: "A GitHub Action to post RSS feed items to Bluesky (BSKY) using a P
 on:
   workflow_dispatch:
   schedule:
-  - cron: '*/10 * * * *' # every 10 minutes
+    - cron: '*/10 * * * *' # every 10 minutes
 
 jobs:
   post:
@@ -21,9 +21,3 @@ jobs:
     - name: Run script
       run: |
         python3 rss2bsky.py "https://www.mundodeportivo.com/feed/rss/home" "${{ secrets.BSKY_HANDLE }}" "${{ secrets.BSKY_USERNAME }}" "${{ secrets.BSKY_APP_PASSWORD }}" --path-only "futbol" --path-only "baloncesto" --category-format-file "format.json" --spread-seconds 600
-    - name: Upload log artifact
-      if: ${{ always() }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: rss2bsky-log
-        path: rss2bsky.log
