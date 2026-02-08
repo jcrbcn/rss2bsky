@@ -550,6 +550,7 @@ def main() -> None:
     last_bsky = get_last_bsky(client, bsky_handle)
     logging.info("Last Bluesky post: %s", str(last_bsky))
     last_feed_check = read_last_feed_check(args.state_file)
+    write_last_feed_check(args.state_file, arrow.utcnow())
     cutoff = max(last_bsky, last_feed_check) if last_feed_check else last_bsky
     if last_feed_check:
         logging.info("Last feed check: %s; cutoff: %s", last_feed_check, cutoff)
@@ -565,7 +566,6 @@ def main() -> None:
     run_posting_loop(
         new_items, client, spread_seconds, translate_target, translate_source
     )
-    write_last_feed_check(args.state_file, arrow.utcnow())
 
 
 if __name__ == "__main__":
