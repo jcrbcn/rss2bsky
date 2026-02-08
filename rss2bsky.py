@@ -94,6 +94,31 @@ def get_last_bsky(client: Client, handle: str) -> arrow.Arrow:
     return arrow.get(0)
 
 
+def read_last_feed_check(state_file: Optional[str]) -> Optional[arrow.Arrow]:
+    """Read last feed-check time from state file. Returns None if no file or invalid."""
+    if not state_file:
+        return None
+    try:
+        with open(state_file, "r", encoding="utf-8") as f:
+            line = f.read().strip()
+            if line:
+                return arrow.get(line)
+    except (OSError, arrow.parser.ParserError) as e:
+        logging.debug("Could not read state file %s: %s", state_file, e)
+    return None
+
+
+def write_last_feed_check(state_file: Optional[str], when: arrow.Arrow) -> None:
+    """Write feed-check time to state file (ISO format)."""
+    if not state_file:
+        return
+    try:
+        with open(state_file, "w", encoding="utf-8") as f:
+            f.write(when.isoformat())
+    except OSError as e:
+        logging.warning("Could not write state file %s: %s", state_file, e)
+
+
 def make_rich(content: str):
     """Build atproto TextBuilder with links and hashtags from plain text. Returns a TextBuilder instance."""
     url_pattern = re.compile(r"https?://[^\s]+")
@@ -313,6 +338,14 @@ def parse_args() -> argparse.Namespace:
             "For example, 600 spreads posts over 10 minutes."
         ),
     )
+    parser.add_argument(
+        "--state-file",
+        default=None,
+        help=(
+            "Path to a file storing the last feed-check time (ISO timestamp). "
+            "Used so the cutoff is 'last time we checked the feed', not just 'last post time'."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -333,13 +366,13 @@ def create_client(username: str, password: str) -> Client:
 def fetch_new_feed_items(
     feed_url: str,
     path_only: list[str],
-    last_bsky: arrow.Arrow,
+    cutoff: arrow.Arrow,
     category_formats: dict[str, str],
     translate_source: str,
     translate_target: Optional[str],
     translation_pretext: str,
 ) -> list[PendingPost]:
-    """Parse feed, filter by path and time, apply formatting and translation. Returns list of PendingPost sorted by rss_time."""
+    """Parse feed, filter by path and time (rss_time > cutoff), apply formatting and translation. Returns list of PendingPost sorted by rss_time."""
     feed = fastfeedparser.parse(feed_url)
     new_items: list[PendingPost] = []
     for item in feed.entries:
@@ -374,7 +407,7 @@ def fetch_new_feed_items(
             translated_link = build_google_translate_url(item.link, translate_target)
         link_for_post = translated_link if translated_link else item.link
         rich_text = make_rich(post_text)
-        if rss_time > last_bsky:
+        if rss_time > cutoff:
             new_items.append(
                 PendingPost(
                     rss_time=rss_time,
@@ -516,10 +549,14 @@ def main() -> None:
     client = create_client(bsky_username, bsky_password)
     last_bsky = get_last_bsky(client, bsky_handle)
     logging.info("Last Bluesky post: %s", str(last_bsky))
+    last_feed_check = read_last_feed_check(args.state_file)
+    cutoff = max(last_bsky, last_feed_check) if last_feed_check else last_bsky
+    if last_feed_check:
+        logging.info("Last feed check: %s; cutoff: %s", last_feed_check, cutoff)
     new_items = fetch_new_feed_items(
         feed_url,
         path_only,
-        last_bsky,
+        cutoff,
         category_formats,
         translate_source,
         translate_target,
@@ -528,6 +565,7 @@ def main() -> None:
     run_posting_loop(
         new_items, client, spread_seconds, translate_target, translate_source
     )
+    write_last_feed_check(args.state_file, arrow.utcnow())
 
 
 if __name__ == "__main__":

@@ -11,6 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - name: Cache last-feed-check state
+      uses: actions/cache@v4
+      with:
+        path: .rss2bsky_state_cat
+        key: rss2bsky-cat-${{ github.run_id }}
+        restore-keys: rss2bsky-cat-
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -20,6 +26,7 @@ jobs:
         pip install atproto fastfeedparser beautifulsoup4 httpx arrow
     - name: Run script
       run: |
-        python3 rss2bsky.py "https://www.mundodeportivo.com/feed/rss/home" "${{ secrets.BSKY_HANDLE_CAT }}" "${{ secrets.BSKY_USERNAME_CAT }}" "${{ secrets.BSKY_APP_PASSWORD }}" --path-only "futbol" --path-only "baloncesto" --translate-source "ES" --translate-target "CA" --translation-pretext "Traducció automàtica - Original: " --category-format-file "format.json" --spread-seconds 600
+        mkdir -p .rss2bsky_state_cat
+        python3 rss2bsky.py "https://www.mundodeportivo.com/feed/rss/home" "${{ secrets.BSKY_HANDLE_CAT }}" "${{ secrets.BSKY_USERNAME_CAT }}" "${{ secrets.BSKY_APP_PASSWORD }}" --path-only "futbol" --path-only "baloncesto" --translate-source "ES" --translate-target "CA" --translation-pretext "Traducció automàtica - Original: " --category-format-file "format.json" --spread-seconds 600 --state-file .rss2bsky_state_cat/last_check
       env:
         DEEPL_AUTH_KEY: ${{ secrets.DEEPL_AUTH_KEY }}

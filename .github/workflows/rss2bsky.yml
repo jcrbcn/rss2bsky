@@ -11,6 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - name: Cache last-feed-check state
+      uses: actions/cache@v4
+      with:
+        path: .rss2bsky_state
+        key: rss2bsky-${{ github.run_id }}
+        restore-keys: rss2bsky-
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -20,4 +26,5 @@ jobs:
         pip install atproto fastfeedparser beautifulsoup4 httpx arrow
     - name: Run script
       run: |
-        python3 rss2bsky.py "https://www.mundodeportivo.com/feed/rss/home" "${{ secrets.BSKY_HANDLE }}" "${{ secrets.BSKY_USERNAME }}" "${{ secrets.BSKY_APP_PASSWORD }}" --path-only "futbol" --path-only "baloncesto" --category-format-file "format.json" --spread-seconds 600
+        mkdir -p .rss2bsky_state
+        python3 rss2bsky.py "https://www.mundodeportivo.com/feed/rss/home" "${{ secrets.BSKY_HANDLE }}" "${{ secrets.BSKY_USERNAME }}" "${{ secrets.BSKY_APP_PASSWORD }}" --path-only "futbol" --path-only "baloncesto" --category-format-file "format.json" --spread-seconds 600 --state-file .rss2bsky_state/last_check
