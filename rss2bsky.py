@@ -515,6 +515,7 @@ def main() -> None:
 
     client = create_client(bsky_username, bsky_password)
     last_bsky = get_last_bsky(client, bsky_handle)
+    logging.info("Last Bluesky post: %s", str(last_bsky))
     new_items = fetch_new_feed_items(
         feed_url,
         path_only,
