@@ -373,7 +373,7 @@ def fetch_new_feed_items(
     translation_pretext: str,
 ) -> list[PendingPost]:
     """Parse feed, filter by path and time (rss_time > cutoff), apply formatting and translation. Returns list of PendingPost sorted by rss_time."""
-    feed = fastfeedparser.parse(feed_url)
+    feed = fastfeedparser.parse(feed_url, timeout=60, retries=3)
     new_items: list[PendingPost] = []
     for item in feed.entries:
         rss_time = arrow.get(item.published)
